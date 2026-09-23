@@ -281,8 +281,15 @@ function createShip(id: SiteId, materials: Record<string, StandardMaterial>): Sh
   return { id, group, doors, open: true, doorAmount: 1 };
 }
 
-function createRover(materials: Record<string, StandardMaterial>, tanks = false) {
+export interface DriveableRover {
+  group: THREE.Group;
+  wheels: THREE.Mesh[];
+  home: { x: number; z: number; heading: number };
+}
+
+function createRover(materials: Record<string, StandardMaterial>, tanks = false, driveable = false) {
   const group = new THREE.Group();
+  const wheels: THREE.Mesh[] = [];
   const { steel, dark, trim, black, orange, white } = materials;
   box(group, trim, [6.9, 0.45, 3.7], [0, 1, 0]);
   box(group, dark, [5.8, 0.35, 2.4], [0, 0.67, 0]);
@@ -292,8 +299,10 @@ function createRover(materials: Record<string, StandardMaterial>, tanks = false)
       const x = -2.45 + i * (4.9 / (wheelCount - 1));
       const wheel = part(group, new THREE.CylinderGeometry(0.56, 0.56, 0.48, 24), black, x, 0.59, side * 1.87);
       wheel.rotation.x = Math.PI / 2;
+      if (driveable) wheels.push(wheel);
       const hub = part(group, new THREE.CylinderGeometry(0.35, 0.35, 0.5, 12), trim, x, 0.59, side * 1.88);
       hub.rotation.x = Math.PI / 2;
+      if (driveable) wheels.push(hub);
       const axle = part(group, new THREE.CylinderGeometry(0.11, 0.11, 0.52, 8), dark, x, 0.59, side * 1.91);
       axle.rotation.x = Math.PI / 2;
       for (let s = 0; s < 8; s++) {
@@ -336,8 +345,15 @@ function createRover(materials: Record<string, StandardMaterial>, tanks = false)
     }
   }
   for (const x of [-3.2, 3.2]) box(group, orange, [0.26, 0.13, 0.1], [x, 1.02, 1.92]);
-  batchStatic(group);
-  return group;
+  if (driveable) {
+    // Open driver seat at the front of the bed so the rider visibly sits in the rover.
+    box(group, dark, [1.0, 0.16, 1.0], [2.55, 1.3, 0]);
+    box(group, dark, [0.16, 0.95, 1.0], [3.0, 1.75, 0]);
+    box(group, orange, [0.5, 0.35, 0.12], [1.9, 1.6, 0]);
+  } else {
+    batchStatic(group);
+  }
+  return { group, wheels };
 }
 
 export interface Astronaut {
@@ -417,6 +433,7 @@ export interface MarsWorld {
   scene: THREE.Scene;
   astronaut: Astronaut;
   ships: Ship[];
+  rover: DriveableRover;
   dust: THREE.Points;
   light: THREE.DirectionalLight;
   sky: THREE.ShaderMaterial;
@@ -638,14 +655,19 @@ export function createWorld(renderer: THREE.WebGLRenderer): MarsWorld {
   ships[1].group.rotation.y = 0.08;
   ships.forEach(ship => scene.add(ship.group));
 
-  const rover = createRover(materials);
-  rover.position.set(-15, terrainHeight(-15, 13), 13);
-  rover.rotation.y = -0.15;
-  scene.add(rover);
+  const rover = createRover(materials, false, true);
+  rover.group.position.set(-15, terrainHeight(-15, 13), 13);
+  rover.group.rotation.y = -0.15;
+  scene.add(rover.group);
+  const driveable: DriveableRover = {
+    group: rover.group,
+    wheels: rover.wheels,
+    home: { x: -15, z: 13, heading: -0.15 },
+  };
   const tanker = createRover(materials, true);
-  tanker.position.set(15, terrainHeight(15, 9), 9);
-  tanker.rotation.y = -0.16;
-  scene.add(tanker);
+  tanker.group.position.set(15, terrainHeight(15, 9), 9);
+  tanker.group.rotation.y = -0.16;
+  scene.add(tanker.group);
 
   const crates = new THREE.Group();
   for (let i = 0; i < 3; i++) {
@@ -696,7 +718,7 @@ export function createWorld(renderer: THREE.WebGLRenderer): MarsWorld {
   scene.add(footprints);
 
   return {
-    scene, astronaut, ships, dust, light, sky, footprints, environment,
+    scene, astronaut, ships, rover: driveable, dust, light, sky, footprints, environment,
     setLight(mode) {
       if (mode === 'day') {
         light.position.set(-65, 140, 45);

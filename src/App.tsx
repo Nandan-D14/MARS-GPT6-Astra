@@ -31,7 +31,7 @@ function OutpostMark({ className = '' }: { className?: string }) {
   );
 }
 
-const initialTelemetry: Telemetry = { x: 0, z: 48, heading: 0, speed: 0, elapsed: 0, nearest: null, fps: 60 };
+const initialTelemetry: Telemetry = { x: 0, z: 48, heading: 0, speed: 0, elapsed: 0, nearest: null, fps: 60, riding: false };
 
 export default function App() {
   const sceneRef = useRef<HTMLDivElement>(null);
@@ -181,6 +181,23 @@ export default function App() {
     notify(`Arrived at ${SITES.find(site => site.id === id)!.name}.`, 'Press E to take a closer look.');
   };
 
+  const toggleRide = () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (telemetry.riding) {
+      engine.exitRover();
+      notify('Back on foot.', 'The rover is parked where you left it.');
+    } else {
+      const ok = engine.toggleRide();
+      if (ok) {
+        setPanel(null);
+        notify('Rover engaged.', 'W/S to drive, A/D to steer, Shift for boost. F to dismount.');
+      } else {
+        notify('Rover out of reach.', 'Walk close to the Cargo Rover, then press F.');
+      }
+    }
+  };
+
   const currentSite = SITES.find(site => site.id === waypoint)!;
   const selectedSite = SITES.find(site => site.id === mapSelection)!;
   const inspectedSite = SITES.find(site => site.id === inspected)!;
@@ -246,7 +263,9 @@ export default function App() {
           <span className="waypoint-content"><span className="eyebrow">{allVisited ? 'EXPEDITION COMPLETE' : 'YOUR FIRST EXPEDITION'}</span><strong>{allVisited ? 'A world of possibilities.' : 'Explore the landing site'} <ArrowUpRight size={15} /></strong><span className="waypoint-detail">{currentSite.name}<span className="middle-dot" />{waypointDistance} m away<span className="waypoint-count">{visited.length} / 3</span></span><span className="expedition-progress">{SITES.map(site => <i key={site.id} className={visited.includes(site.id) ? 'complete' : ''} />)}</span></span>
         </button>
         <div className="radar-hud"><button className="radar-button" aria-label="Open interactive site map" onClick={() => { setMapSelection(waypoint); setPanel('map'); }}><SiteMap telemetry={telemetry} selected={waypoint} visited={visited} /><span className="map-open-label"><Expand size={11} /> OPEN MAP</span></button><span className="radar-coordinates">38.2&deg; N &nbsp; 169.8&deg; W</span></div>
-        {telemetry.nearest && !panel && <button className="interaction-prompt" onClick={() => engineRef.current?.interact()}><kbd>E</kbd><span>Explore <strong>{SITES.find(site => site.id === telemetry.nearest)!.name}</strong></span><ChevronRight size={15} /></button>}
+        {telemetry.nearest && !panel && !telemetry.riding && <button className="interaction-prompt" onClick={() => engineRef.current?.interact()}><kbd>E</kbd><span>Explore <strong>{SITES.find(site => site.id === telemetry.nearest)!.name}</strong></span><ChevronRight size={15} /></button>}
+        {telemetry.nearest === 'rover' && !panel && !telemetry.riding && <button className="interaction-prompt" style={{ bottom: '86px' }} onClick={toggleRide}><kbd>F</kbd><span>Ride the <strong>Cargo Rover</strong></span><ChevronRight size={15} /></button>}
+        {telemetry.riding && !panel && <button className="interaction-prompt" onClick={toggleRide}><kbd>F</kbd><span>Dismount rover <strong>{Math.abs(telemetry.speed).toFixed(1)} m/s</strong></span><ChevronRight size={15} /></button>}
         <div className="touch-controls" aria-label="Touch movement controls"><div className="direction-pad"><button className="pad-up" aria-label="Walk forward" {...touchKey('KeyW')}><ArrowUp size={19} /></button><button className="pad-left" aria-label="Walk left" {...touchKey('KeyA')}><ArrowLeft size={19} /></button><button className="pad-down" aria-label="Walk backward" {...touchKey('KeyS')}><ArrowDown size={19} /></button><button className="pad-right" aria-label="Walk right" {...touchKey('KeyD')}><ArrowRight size={19} /></button></div><button className="touch-jump" onClick={() => engineRef.current?.jump()} aria-label="Jump"><ArrowUp size={20} /><span>JUMP</span></button></div>
         {!ready && <div className="loading-overlay">{error ? <><OutpostMark /><h2>A little further to go.</h2><p>{error}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again <RotateCcw size={16} /></button></> : <><OutpostMark /><span>PREPARING YOUR ARRIVAL</span><div className="loading-track"><i /></div><p>Another world is taking shape.</p></>}</div>}
         <div className={`photo-flash ${flash ? 'active' : ''}`} aria-hidden="true" />
@@ -256,7 +275,7 @@ export default function App() {
 
       <footer className="control-bar">
         <div className="camera-controls"><span className="control-label">YOUR PERSPECTIVE</span><div className="camera-segment"><button disabled={!ready} className={mode === 'third-person' ? 'selected' : ''} onClick={() => setCamera('third-person')} aria-pressed={mode === 'third-person'}><PersonStanding size={17} /> Third person</button><button disabled={!ready} className={mode === 'orbit' ? 'selected' : ''} onClick={() => setCamera('orbit')} aria-pressed={mode === 'orbit'}><Orbit size={17} /> Orbit view</button></div></div>
-        <div className="keyboard-legend" aria-label="Movement shortcuts"><div className="legend-item move-legend"><div className="wasd"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div><span>Move</span></div><div className="legend-divider" /><div className="legend-item"><Mouse size={21} strokeWidth={1.25} /><span>Drag to look</span></div><div className="legend-item"><kbd className="wide-key">SHIFT</kbd><span>Run</span></div><div className="legend-item"><kbd className="wide-key">SPACE</kbd><span>Jump</span></div><div className="legend-item switch-legend"><kbd>C</kbd><span>Switch view</span></div></div>
+        <div className="keyboard-legend" aria-label="Movement shortcuts"><div className="legend-item move-legend"><div className="wasd"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div><span>Move / Drive</span></div><div className="legend-divider" /><div className="legend-item"><Mouse size={21} strokeWidth={1.25} /><span>Drag to look</span></div><div className="legend-item"><kbd className="wide-key">SHIFT</kbd><span>Run / Boost</span></div><div className="legend-item"><kbd className="wide-key">SPACE</kbd><span>Jump</span></div><div className="legend-item switch-legend"><kbd>C</kbd><span>Switch view</span></div><div className="legend-item switch-legend"><kbd>F</kbd><span>{telemetry.riding ? 'Dismount' : 'Ride rover'}</span></div></div>
         <div className="reset-controls"><button className="reset-button" onClick={reset} disabled={!ready}><RotateCcw size={14} /><span>Reset position</span><kbd>R</kbd></button><span className="engine-credit"><i /> BUILT TO EXPLORE. POWERED BY THREE.JS.</span></div>
       </footer>
 
@@ -274,7 +293,7 @@ export default function App() {
           {panel === 'controls' && <>
             <div className="panel-icon"><Keyboard size={29} strokeWidth={1.2} /></div><h2 id="panel-title">Find your feet.</h2><p className="panel-description">No training required. Just a little curiosity.</p>
             <div className="controls-list">
-              <div><span>Walk in any direction</span><span className="key-group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div><div><span>Look around</span><span><Mouse size={16} /> Click & drag</span></div><div><span>Move a little faster</span><kbd>SHIFT</kbd></div><div><span>Jump in Martian gravity</span><kbd>SPACE</kbd></div><div><span>Get closer / pull back</span><span><Mouse size={16} /> Scroll</span></div><div><span>Switch camera view</span><kbd>C</kbd></div><div><span>Inspect a nearby site</span><kbd>E</kbd></div><div><span>Return to the landing point</span><kbd>R</kbd></div><div><span>Close an open panel</span><kbd>ESC</kbd></div>
+              <div><span>Walk in any direction</span><span className="key-group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div><div><span>Look around</span><span><Mouse size={16} /> Click & drag</span></div><div><span>Move a little faster</span><kbd>SHIFT</kbd></div><div><span>Jump in Martian gravity</span><kbd>SPACE</kbd></div><div><span>Get closer / pull back</span><span><Mouse size={16} /> Scroll</span></div><div><span>Switch camera view</span><kbd>C</kbd></div><div><span>Inspect a nearby site</span><kbd>E</kbd></div><div><span>Ride / dismount the rover</span><kbd>F</kbd></div><div><span>Drive the rover (W/S throttle, A/D steer)</span><span className="key-group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></div><div><span>Return to the landing point</span><kbd>R</kbd></div><div><span>Close an open panel</span><kbd>ESC</kbd></div>
             </div><div className="panel-note"><PersonStanding size={21} /><p>Third person follows your astronaut. Orbit view lets you fly around the outpost. On touch screens, use the directional pad and drag the scene to look.</p></div><button className="primary-button panel-bottom-button" onClick={() => { setPanel(null); engineRef.current?.startExploring(); }}>Ready to explore<ArrowUpRight size={18} /></button>
           </>}
           {panel === 'map' && <>
@@ -288,7 +307,7 @@ export default function App() {
             <div className="panel-icon">{inspected === 'rover' ? <Navigation size={29} strokeWidth={1.2} /> : <DoorOpen size={29} strokeWidth={1.2} />}</div><span className="eyebrow asset-type">{inspectedSite.type}</span><h2 id="panel-title">{inspectedSite.name}.</h2><p className="panel-description">{inspectedSite.description}</p>
             <div className="asset-drawing" aria-hidden="true">{inspected === 'rover' ? <svg viewBox="0 0 280 160"><path d="M45 109H235V123H45ZM61 71h43v37H61zM120 71h43v37h-43zM179 71h43v37h-43zM62 72a21 21 0 0142 0M121 72a21 21 0 0142 0M180 72a21 21 0 0142 0" /><circle cx="71" cy="127" r="12" /><circle cx="116" cy="127" r="12" /><circle cx="163" cy="127" r="12" /><circle cx="209" cy="127" r="12" /></svg> : <svg viewBox="0 0 280 260"><path d="M120 223V75Q121 45 140 18Q159 45 160 75V223ZM120 158L102 193V224H120M160 158L178 193V224H160M121 68L107 90V109H120M159 68L173 90V109H160M120 124H160M120 135H160M120 147H160M120 171H160M120 183H160M120 195H160M120 207H160M120 79H160M124 87H156V119H124ZM124 223L111 239H100M156 223L169 239H180M133 223V235H147V223" /><path className="dimension-line" d="M89 20V237M85 20H94M85 237H94M188 223H216M188 18H216M211 18V223" /><text x="71" y="137" transform="rotate(-90 71 137)">51.0 M</text><text x="203" y="132" transform="rotate(-90 203 132)">OUTPOST / {inspected === 'alpha' ? 'A-01' : 'B-02'}</text></svg>}</div>
             <div className="asset-specs"><div><span>STATUS</span><strong><i />Operational</strong></div><div><span>{inspected === 'rover' ? 'PAYLOAD' : 'HEIGHT'}</span><strong>{inspected === 'rover' ? 'Pressurized cargo' : '51 meters'}</strong></div><div><span>LOCATION</span><strong>Arcadia Planitia</strong></div></div>
-            {inspected !== 'rover' ? <button className="primary-button" onClick={() => { const open = engineRef.current?.toggleCargo(inspected) ?? true; setCargoOpen(open); setPanel(null); notify(open ? 'Cargo bay opening.' : 'Cargo bay closing.', `${inspectedSite.name} cargo doors activated.`); }}><DoorOpen size={17} />{cargoOpen ? 'Close cargo bay' : 'Open cargo bay'}<ArrowRight size={17} /></button> : <><button className="primary-button" onClick={() => setManifestOpen(value => !value)}>Cargo manifest<ChevronRight size={17} /></button>{manifestOpen && <div className="cargo-manifest"><div><span>Pressurized oxygen</span><strong>3 modules</strong></div><div><span>Water reserves</span><strong>1,200 L</strong></div><div><span>Destination</span><strong>Starship Alpha</strong></div><p>Simulated mission inventory.</p></div>}</>}
+            {inspected !== 'rover' ? <button className="primary-button" onClick={() => { const open = engineRef.current?.toggleCargo(inspected) ?? true; setCargoOpen(open); setPanel(null); notify(open ? 'Cargo bay opening.' : 'Cargo bay closing.', `${inspectedSite.name} cargo doors activated.`); }}><DoorOpen size={17} />{cargoOpen ? 'Close cargo bay' : 'Open cargo bay'}<ArrowRight size={17} /></button> : <><button className="primary-button" onClick={toggleRide}><Navigation size={17} />{telemetry.riding ? 'Dismount rover' : 'Ride rover'}<ArrowRight size={17} /></button><button className="primary-button" style={{ marginTop: '8px' }} onClick={() => setManifestOpen(value => !value)}>Cargo manifest<ChevronRight size={17} /></button>{manifestOpen && <div className="cargo-manifest"><div><span>Pressurized oxygen</span><strong>3 modules</strong></div><div><span>Water reserves</span><strong>1,200 L</strong></div><div><span>Destination</span><strong>Starship Alpha</strong></div><p>Simulated mission inventory.</p></div>}</>}
             <span className="asset-disclaimer">CONCEPTUAL EXPEDITION VEHICLE / 3D RECONSTRUCTION</span>
           </>}
         </aside>

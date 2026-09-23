@@ -32,6 +32,9 @@ export class MarsEngine {
   private walkBlend = 0;
   private footprintDistance = 0;
   private footprintIndex = 0;
+  private riding = false;
+  private roverHeading = 0;
+  private roverSpeed = 0;
   private isDragging = false;
   private pointerX = 0;
   private pointerY = 0;
@@ -68,6 +71,7 @@ export class MarsEngine {
     container.appendChild(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 2300);
     this.world = createWorld(this.renderer);
+    this.roverHeading = this.world.rover.home.heading;
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enabled = false;
     this.controls.enableDamping = true;
@@ -136,6 +140,7 @@ export class MarsEngine {
     if (event.code === 'KeyC') this.setMode(this.mode === 'third-person' ? 'orbit' : 'third-person');
     if (event.code === 'KeyR') this.reset();
     if (event.code === 'KeyE') this.interact();
+    if (event.code === 'KeyF') this.toggleRide();
   };
 
   private onKeyUp = (event: KeyboardEvent) => { this.keys.delete(event.code); };
@@ -197,6 +202,7 @@ export class MarsEngine {
   }
 
   jump() {
+    if (this.riding) return;
     if (this.jumpHeight < 0.025 && !this.paused && this.mode === 'third-person') {
       this.verticalVelocity = 3.8;
       this.beginExploration();
@@ -245,6 +251,12 @@ export class MarsEngine {
     const player = this.world.astronaut.group;
     player.position.set(SPAWN.x, terrainHeight(SPAWN.x, SPAWN.z) + 0.035, SPAWN.z);
     player.rotation.y = Math.PI;
+    const rover = this.world.rover;
+    rover.group.position.set(rover.home.x, terrainHeight(rover.home.x, rover.home.z), rover.home.z);
+    rover.group.rotation.y = rover.home.heading;
+    this.riding = false;
+    this.roverHeading = rover.home.heading;
+    this.roverSpeed = 0;
     this.yaw = 0;
     this.pitch = 0;
     this.distance = 18;
@@ -261,6 +273,7 @@ export class MarsEngine {
   }
 
   travelTo(id: SiteId) {
+    if (this.riding) this.exitRover();
     const site = SITES.find(item => item.id === id)!;
     const player = this.world.astronaut.group;
     const z = site.z + (id === 'rover' ? 7 : 10);
@@ -284,6 +297,56 @@ export class MarsEngine {
   interact() {
     this.updateSites();
     if (this.nearest) this.callbacks.onInteract(this.nearest);
+  }
+
+  isRiding() { return this.riding; }
+
+  canRide() {
+    if (this.riding) return true;
+    const rover = this.world.rover.group.position;
+    const player = this.world.astronaut.group.position;
+    return Math.hypot(rover.x - player.x, rover.z - player.z) < 9;
+  }
+
+  enterRover() {
+    if (this.riding || !this.canRide()) return false;
+    this.riding = true;
+    this.roverHeading = this.world.rover.group.rotation.y;
+    this.roverSpeed = 0;
+    this.beginExploration();
+    if (this.mode === 'orbit') this.setMode('third-person');
+    this.getThirdPersonCamera();
+    this.camera.position.copy(this.cameraPosition);
+    this.smoothTarget.copy(this.cameraTarget);
+    this.emitTelemetry();
+    return true;
+  }
+
+  exitRover() {
+    if (!this.riding) return false;
+    const rover = this.world.rover.group.position;
+    const player = this.world.astronaut.group;
+    player.position.set(
+      rover.x - Math.cos(this.roverHeading) * 4.5,
+      0,
+      rover.z + Math.sin(this.roverHeading) * 4.5,
+    );
+    player.position.y = terrainHeight(player.position.x, player.position.z) + 0.055;
+    player.rotation.y = this.roverHeading;
+    this.riding = false;
+    this.roverSpeed = 0;
+    this.jumpHeight = 0;
+    this.verticalVelocity = 0;
+    this.emitTelemetry();
+    return true;
+  }
+
+  toggleRide() {
+    if (this.riding) return this.exitRover();
+    if (this.nearest === 'rover' || this.canRide()) return this.enterRover();
+    this.updateSites();
+    if (this.nearest === 'rover') return this.enterRover();
+    return false;
   }
 
   toggleCargo(id: SiteId) {
@@ -318,7 +381,7 @@ export class MarsEngine {
   }
 
   private getThirdPersonCamera() {
-    const player = this.world.astronaut.group.position;
+    const player = this.riding ? this.world.rover.group.position : this.world.astronaut.group.position;
     const distance = this.distance * (this.mobile ? 1.25 : 1);
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     this.cameraPosition.set(
@@ -340,6 +403,10 @@ export class MarsEngine {
   }
 
   private updatePlayer(dt: number) {
+    if (this.riding) {
+      this.updateRover(dt);
+      return;
+    }
     let forward = 0, right = 0;
     if (!this.paused && this.mode === 'third-person') {
       if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forward++;
@@ -402,21 +469,76 @@ export class MarsEngine {
     }
   }
 
+  private updateRover(dt: number) {
+    let throttle = 0, steer = 0;
+    if (!this.paused && this.mode === 'third-person') {
+      if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) throttle++;
+      if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) throttle--;
+      if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) steer++;
+      if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) steer--;
+    }
+    const boosting = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const maxSpeed = boosting ? 20 : 13;
+    const maxReverse = -6;
+    const targetSpeed = throttle > 0 ? maxSpeed : throttle < 0 ? maxReverse : 0;
+    this.roverSpeed = THREE.MathUtils.damp(this.roverSpeed, targetSpeed, throttle === 0 ? 3.5 : 2.2, dt);
+    if (Math.abs(this.roverSpeed) > 0.15) {
+      this.roverHeading -= steer * dt * (1.4 + Math.min(1.2, Math.abs(this.roverSpeed) / 10));
+    }
+    const rover = this.world.rover.group;
+    rover.rotation.y = this.roverHeading;
+    rover.position.x = THREE.MathUtils.clamp(
+      rover.position.x + Math.cos(this.roverHeading) * this.roverSpeed * dt, -150, 150);
+    rover.position.z = THREE.MathUtils.clamp(
+      rover.position.z - Math.sin(this.roverHeading) * this.roverSpeed * dt, -170, 145);
+    this.resolveCollisions();
+    rover.position.y = terrainHeight(rover.position.x, rover.position.z);
+    const spin = this.roverSpeed * dt / 0.56;
+    const spinAxis = new THREE.Vector3(0, 1, 0);
+    for (const wheel of this.world.rover.wheels) wheel.rotateOnAxis(spinAxis, spin);
+    // Seat the astronaut in the driver seat, facing travel direction.
+    const astronaut = this.world.astronaut;
+    const player = astronaut.group;
+    const cos = Math.cos(this.roverHeading), sin = Math.sin(this.roverHeading);
+    player.position.set(
+      rover.position.x + cos * 2.55,
+      rover.position.y + 1.38,
+      rover.position.z - sin * 2.55,
+    );
+    player.rotation.y = Math.atan2(cos, -sin);
+    this.speed = Math.abs(this.roverSpeed);
+    this.walkPhase += dt * this.speed * 1.2;
+    astronaut.legs[0].rotation.x = -1.15;
+    astronaut.legs[1].rotation.x = -1.15;
+    astronaut.knees[0].rotation.x = 1.35;
+    astronaut.knees[1].rotation.x = 1.35;
+    astronaut.arms[0].rotation.x = -0.85;
+    astronaut.arms[1].rotation.x = -0.85;
+    astronaut.arms[0].rotation.z = -0.12;
+    astronaut.arms[1].rotation.z = 0.12;
+    astronaut.torso.position.y = Math.sin(this.elapsed * 2.2) * 0.008;
+    astronaut.torso.rotation.z = Math.sin(this.walkPhase) * 0.006;
+  }
+
   private resolveCollisions() {
-    const player = this.world.astronaut.group.position;
+    const riding = this.riding;
+    const player = riding ? this.world.rover.group.position : this.world.astronaut.group.position;
     const colliders = [
       { x: 28, z: -14, radius: 4.55 }, { x: -23, z: -62, radius: 4.55 },
       { x: -15, z: 13, radius: 3.9 }, { x: 15, z: 9, radius: 3.8 },
       { x: -4.65, z: -8, radius: 3.5 },
     ];
-    for (const collider of colliders) {
+    for (let i = 0; i < colliders.length; i++) {
+      if (riding && i === 2) continue; // don't collide with the rover's own parking spot
+      const collider = colliders[i];
+      const radius = riding ? collider.radius + 2.2 : collider.radius;
       const dx = player.x - collider.x, dz = player.z - collider.z;
       const distance = Math.hypot(dx, dz);
-      if (distance < collider.radius) {
-        if (distance < 0.001) player.z = collider.z + collider.radius;
+      if (distance < radius) {
+        if (distance < 0.001) player.z = collider.z + radius;
         else {
-          player.x = collider.x + dx / distance * collider.radius;
-          player.z = collider.z + dz / distance * collider.radius;
+          player.x = collider.x + dx / distance * radius;
+          player.z = collider.z + dz / distance * radius;
         }
       }
     }
@@ -437,7 +559,7 @@ export class MarsEngine {
   }
 
   private updateSites() {
-    const player = this.world.astronaut.group.position;
+    const player = this.riding ? this.world.rover.group.position : this.world.astronaut.group.position;
     this.nearest = null;
     let shortest = Infinity;
     for (const site of SITES) {
@@ -454,10 +576,11 @@ export class MarsEngine {
   }
 
   private emitTelemetry() {
-    const position = this.world.astronaut.group.position;
+    const position = this.riding ? this.world.rover.group.position : this.world.astronaut.group.position;
     this.callbacks.onTelemetry({
-      x: position.x, z: position.z, heading: this.yaw, speed: this.speed,
-      elapsed: this.elapsed, nearest: this.nearest, fps: this.fps,
+      x: position.x, z: position.z, heading: this.riding ? this.roverHeading : this.yaw,
+      speed: this.riding ? this.roverSpeed : this.speed,
+      elapsed: this.elapsed, nearest: this.nearest, fps: this.fps, riding: this.riding,
     });
   }
 

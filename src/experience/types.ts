@@ -39,6 +39,7 @@ export interface Telemetry {
   elapsed: number;
   nearest: SiteId | null;
   fps: number;
+  riding: boolean;
 }
 
 export interface EngineCallbacks {
