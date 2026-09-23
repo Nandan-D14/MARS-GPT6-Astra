@@ -470,6 +470,61 @@ export function createWorld(renderer: THREE.WebGLRenderer): MarsWorld {
   });
   const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1700, 32, 20), sky);
   scene.add(skyMesh);
+
+  // A big, dramatic Martian moon (imagined — real Phobos/Deimos are tiny).
+  // Placed well inside the sky dome and camera far plane so it stays visible.
+  const moonCanvas = document.createElement('canvas');
+  moonCanvas.width = moonCanvas.height = 512;
+  const moonCtx = moonCanvas.getContext('2d')!;
+  const moonGradient = moonCtx.createRadialGradient(200, 190, 40, 256, 256, 360);
+  moonGradient.addColorStop(0, '#f4ece2');
+  moonGradient.addColorStop(0.55, '#d9cec2');
+  moonGradient.addColorStop(1, '#a89c90');
+  moonCtx.fillStyle = moonGradient;
+  moonCtx.fillRect(0, 0, 512, 512);
+  const moonRng = randomGenerator(1234);
+  for (let i = 0; i < 160; i++) {
+    const x = moonRng() * 512, y = moonRng() * 512, r = 3 + moonRng() * 26;
+    moonCtx.fillStyle = `rgba(90,80,72,${0.08 + moonRng() * 0.22})`;
+    moonCtx.beginPath();
+    moonCtx.arc(x, y, r, 0, TAU);
+    moonCtx.fill();
+    moonCtx.strokeStyle = `rgba(255,250,240,${0.1 + moonRng() * 0.25})`;
+    moonCtx.lineWidth = 2;
+    moonCtx.beginPath();
+    moonCtx.arc(x - r * 0.15, y - r * 0.15, r * 0.85, Math.PI * 0.9, Math.PI * 1.9);
+    moonCtx.stroke();
+  }
+  const moonTexture = new THREE.CanvasTexture(moonCanvas);
+  moonTexture.colorSpace = THREE.SRGBColorSpace;
+  const moon = new THREE.Mesh(
+    new THREE.SphereGeometry(120, 64, 64),
+    new THREE.MeshStandardMaterial({
+      map: moonTexture, roughness: 1, metalness: 0,
+      emissive: new THREE.Color('#cfc2b4'), emissiveMap: moonTexture, emissiveIntensity: 0.38,
+      fog: false,
+    }),
+  );
+  moon.position.set(-620, 430, -1050);
+  scene.add(moon);
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = glowCanvas.height = 256;
+  const glowCtx = glowCanvas.getContext('2d')!;
+  const glowGradient = glowCtx.createRadialGradient(128, 128, 10, 128, 128, 128);
+  glowGradient.addColorStop(0, 'rgba(255,236,210,0.55)');
+  glowGradient.addColorStop(0.35, 'rgba(255,225,190,0.18)');
+  glowGradient.addColorStop(1, 'rgba(255,225,190,0)');
+  glowCtx.fillStyle = glowGradient;
+  glowCtx.fillRect(0, 0, 256, 256);
+  const glowTexture = new THREE.CanvasTexture(glowCanvas);
+  glowTexture.colorSpace = THREE.SRGBColorSpace;
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture, transparent: true, depthWrite: false, fog: false, opacity: 0.9,
+  }));
+  glow.scale.setScalar(520);
+  glow.position.copy(moon.position);
+  scene.add(glow);
+
   const hemi = new THREE.HemisphereLight('#f7decd', '#6f4436', 2.5);
   scene.add(hemi);
   const light = new THREE.DirectionalLight('#ffe4c8', 3.4);
